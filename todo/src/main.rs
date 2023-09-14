@@ -49,6 +49,11 @@ enum Event<I> {
     Tick,
 }
 
+enum InputMode {
+    Normal,
+    Editing,
+}
+
 #[derive(Copy, Clone, Debug)]
 enum MenuItem {
     Home,
@@ -98,9 +103,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let menu_titles = vec!["Home", "Tasks"];
     let mut show_pop_up = false;
+    let mut input_mode = InputMode::Normal;
     let mut active_menu_item = MenuItem::Home;
     let mut task_list_state = ListState::default();
     task_list_state.select(Some(0));
+    let mut new_task = String::new();
 
     loop {
         terminal.draw(|rect| {
@@ -171,48 +178,86 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            if show_pop_up {
+            let (cursor_x, cursor_y) = if show_pop_up {
                 let (block, area) = render_popup(size);
                 rect.render_widget(Clear, area);
                 rect.render_widget(block, area);
+
+                let input =
+                    Paragraph::new(new_task.as_ref()).style(Style::default().fg(Color::Cyan));
+                rect.render_widget(input, centered_rect(95, 60, area));
+                (area.x, area.y)
+            } else {
+                (0, 0)
+            };
+
+            match input_mode {
+                InputMode::Normal => {}
+                InputMode::Editing => {
+                    rect.set_cursor(cursor_x + new_task.len() as u16 + 1, cursor_y + 1)
+                }
             }
         })?;
 
         match rx.recv()? {
-            Event::Input(event) => match event.code {
-                KeyCode::Char('q') => {
-                    disable_raw_mode()?;
-                    terminal.show_cursor()?;
-                    break;
-                }
-                KeyCode::Char('h') => active_menu_item = MenuItem::Home,
-                KeyCode::Char('t') => active_menu_item = MenuItem::Tasks,
-                KeyCode::Char('a') => show_pop_up = true,
-                KeyCode::Enter => show_pop_up = false,
-                KeyCode::Char('d') => {
-                    remove_task_at_index(&mut task_list_state).unwrap_or_else(|_| ());
-                }
-                KeyCode::Down => {
-                    if let Some(selected) = task_list_state.selected() {
-                        let amount_tasks = read_db().expect("Can read db.").len();
-                        if selected >= amount_tasks - 1 {
-                            task_list_state.select(Some(0));
-                        } else {
-                            task_list_state.select(Some(selected + 1));
+            Event::Input(event) => match input_mode {
+                InputMode::Normal => match event.code {
+                    KeyCode::Char('q') => {
+                        disable_raw_mode()?;
+                        terminal.show_cursor()?;
+                        break;
+                    }
+                    KeyCode::Char('h') => active_menu_item = MenuItem::Home,
+                    KeyCode::Char('t') => active_menu_item = MenuItem::Tasks,
+                    KeyCode::Char('a') => {
+                        show_pop_up = true;
+                        input_mode = InputMode::Editing;
+                    }
+                    KeyCode::Char('d') => {
+                        remove_task_at_index(&mut task_list_state).unwrap_or_else(|_| ());
+                    }
+                    KeyCode::Down => {
+                        if let Some(selected) = task_list_state.selected() {
+                            let amount_tasks = read_db().expect("Can read db.").len();
+                            if selected >= amount_tasks - 1 {
+                                task_list_state.select(Some(0));
+                            } else {
+                                task_list_state.select(Some(selected + 1));
+                            }
                         }
                     }
-                }
-                KeyCode::Up => {
-                    if let Some(selected) = task_list_state.selected() {
-                        let amount_tasks = read_db().expect("Can read db.").len();
-                        if selected > 0 {
-                            task_list_state.select(Some(selected - 1));
-                        } else {
-                            task_list_state.select(Some(amount_tasks - 1));
+                    KeyCode::Up => {
+                        if let Some(selected) = task_list_state.selected() {
+                            let amount_tasks = read_db().expect("Can read db.").len();
+                            if selected > 0 {
+                                task_list_state.select(Some(selected - 1));
+                            } else {
+                                task_list_state.select(Some(amount_tasks - 1));
+                            }
                         }
                     }
-                }
-                _ => {}
+                    _ => {}
+                },
+                InputMode::Editing => match event.code {
+                    KeyCode::Enter => {
+                        add_task_to_db(&new_task)?;
+                        input_mode = InputMode::Normal;
+                        new_task = String::new();
+                        show_pop_up = false;
+                    }
+                    KeyCode::Char(c) => {
+                        new_task.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        new_task.pop();
+                    }
+                    KeyCode::Esc => {
+                        input_mode = InputMode::Normal;
+                        new_task = String::new();
+                        show_pop_up = false;
+                    }
+                    _ => {}
+                },
             },
             Event::Tick => {}
         }
