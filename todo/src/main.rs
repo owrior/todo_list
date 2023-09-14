@@ -156,12 +156,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             rect.render_widget(tabs, chunks[0]);
 
-            if show_pop_up {
-                let (block, area) = render_popup(size);
-                rect.render_widget(Clear, area);
-                rect.render_widget(block, area);
-            }
-
             match active_menu_item {
                 MenuItem::Home => rect.render_widget(render_home(), chunks[1]),
                 MenuItem::Tasks => {
@@ -175,6 +169,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     rect.render_stateful_widget(left, todo_chunks[0], &mut task_list_state);
                     rect.render_widget(right, todo_chunks[1]);
                 }
+            }
+
+            if show_pop_up {
+                let (block, area) = render_popup(size);
+                rect.render_widget(Clear, area);
+                rect.render_widget(block, area);
             }
         })?;
 
