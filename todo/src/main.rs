@@ -1,5 +1,4 @@
 use chrono::DateTime;
-use chrono::TimeZone;
 use chrono::Utc;
 use crossterm::event;
 use crossterm::event::Event as CEvent;
