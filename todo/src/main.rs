@@ -1,4 +1,5 @@
 use chrono::DateTime;
+use chrono::TimeZone;
 use chrono::Utc;
 use crossterm::event;
 use crossterm::event::Event as CEvent;
@@ -34,6 +35,13 @@ struct Task {
     name: String,
     created_at: DateTime<Utc>,
     completed_at: Option<DateTime<Utc>>,
+}
+
+impl Task {
+    fn complete_task(mut self) -> Self {
+        self.completed_at = Some(Utc::now());
+        self
+    }
 }
 
 #[derive(Error, Debug)]
@@ -194,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match input_mode {
                 InputMode::Normal => {}
                 InputMode::Editing => {
-                    rect.set_cursor(cursor_x + new_task.len() as u16 + 1, cursor_y + 1)
+                    rect.set_cursor(cursor_x + new_task.len() as u16 + 2, cursor_y + 1)
                 }
             }
         })?;
@@ -215,6 +223,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     KeyCode::Char('d') => {
                         remove_task_at_index(&mut task_list_state).unwrap_or_else(|_| ());
+                    }
+                    KeyCode::Char('c') => {
+                        complete_task(&mut task_list_state)?;
                     }
                     KeyCode::Down => {
                         if let Some(selected) = task_list_state.selected() {
@@ -314,19 +325,27 @@ fn render_todo<'a>(task_list_state: &ListState) -> (List<'a>, Table<'a>) {
         .map(|task| {
             ListItem::new(Spans::from(vec![Span::styled(
                 task.name.clone(),
-                Style::default(),
+                match task.completed_at {
+                    Some(_) => Style::default().fg(Color::Green),
+                    None => Style::default(),
+                },
             )]))
         })
         .collect();
 
-    let selected_task = task_list
-        .get(
-            task_list_state
-                .selected()
-                .expect("There is always a selected task."),
-        )
-        .expect("Exists")
-        .clone();
+    let selected_task = match task_list.get(
+        task_list_state
+            .selected()
+            .expect("There is always a selected task."),
+    ) {
+        Some(task) => task.clone(),
+        None => Task {
+            id: 0,
+            name: String::from("Create some tasks!"),
+            created_at: Utc::now(),
+            completed_at: None,
+        },
+    };
 
     let list = List::new(items).block(tasks).highlight_style(
         Style::default()
@@ -401,7 +420,26 @@ fn remove_task_at_index(task_list_state: &mut ListState) -> Result<(), Error> {
         let mut parsed = read_db()?;
         parsed.remove(selected);
         write_db(&parsed)?;
-        task_list_state.select(Some(selected - 1));
+        match selected {
+            0 => task_list_state.select(Some(0)),
+            _ => task_list_state.select(Some(selected - 1)),
+        };
+    }
+    Ok(())
+}
+
+fn complete_task(task_list_state: &mut ListState) -> Result<(), Error> {
+    if let Some(selected) = task_list_state.selected() {
+        let mut parsed = read_db()?;
+        let task = match parsed.get(selected) {
+            Some(e) => e.clone().complete_task(),
+            _ => return Ok(()),
+        };
+
+        parsed.remove(selected);
+        parsed.insert(selected, task);
+
+        write_db(&parsed)?;
     }
     Ok(())
 }
