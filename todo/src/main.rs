@@ -1,5 +1,4 @@
 use chrono::DateTime;
-use chrono::ParseError;
 use chrono::Utc;
 use crossterm::event;
 use crossterm::event::Event as CEvent;
@@ -18,11 +17,11 @@ use tui::style::Color;
 use tui::style::Modifier;
 use tui::text::{Span, Spans};
 use tui::widgets::{
-    Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs,
+    Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs,
 };
 use tui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Style,
     Terminal,
 };
@@ -66,7 +65,7 @@ impl From<MenuItem> for usize {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    enable_raw_mode().expect("Can run in raw mode.");
+    enable_raw_mode()?;
     let (tx, rx) = mpsc::channel();
     let tick_rate = Duration::from_millis(200);
 
@@ -98,6 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.clear()?;
 
     let menu_titles = vec!["Home", "Tasks"];
+    let mut show_pop_up = false;
     let mut active_menu_item = MenuItem::Home;
     let mut task_list_state = ListState::default();
     task_list_state.select(Some(0));
@@ -156,6 +156,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             rect.render_widget(tabs, chunks[0]);
 
+            if show_pop_up {
+                let (block, area) = render_popup(size);
+                rect.render_widget(Clear, area);
+                rect.render_widget(block, area);
+            }
+
             match active_menu_item {
                 MenuItem::Home => rect.render_widget(render_home(), chunks[1]),
                 MenuItem::Tasks => {
@@ -170,7 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     rect.render_widget(right, todo_chunks[1]);
                 }
             }
-        });
+        })?;
 
         match rx.recv()? {
             Event::Input(event) => match event.code {
@@ -181,6 +187,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 KeyCode::Char('h') => active_menu_item = MenuItem::Home,
                 KeyCode::Char('t') => active_menu_item = MenuItem::Tasks,
+                KeyCode::Char('a') => show_pop_up = true,
+                KeyCode::Enter => show_pop_up = false,
+                KeyCode::Char('d') => {
+                    remove_task_at_index(&mut task_list_state).unwrap_or_else(|_| ());
+                }
+                KeyCode::Down => {
+                    if let Some(selected) = task_list_state.selected() {
+                        let amount_tasks = read_db().expect("Can read db.").len();
+                        if selected >= amount_tasks - 1 {
+                            task_list_state.select(Some(0));
+                        } else {
+                            task_list_state.select(Some(selected + 1));
+                        }
+                    }
+                }
+                KeyCode::Up => {
+                    if let Some(selected) = task_list_state.selected() {
+                        let amount_tasks = read_db().expect("Can read db.").len();
+                        if selected > 0 {
+                            task_list_state.select(Some(selected - 1));
+                        } else {
+                            task_list_state.select(Some(amount_tasks - 1));
+                        }
+                    }
+                }
                 _ => {}
             },
             Event::Tick => {}
@@ -218,6 +249,11 @@ fn read_db() -> Result<Vec<Task>, Error> {
     let db_content = fs::read_to_string(DB_PATH)?;
     let parsed: Vec<Task> = serde_json::from_str(&db_content)?;
     Ok(parsed)
+}
+
+fn write_db(tasks: &Vec<Task>) -> Result<(), Error> {
+    fs::write(DB_PATH, &serde_json::to_vec(tasks)?)?;
+    Ok(())
 }
 
 fn render_todo<'a>(task_list_state: &ListState) -> (List<'a>, Table<'a>) {
@@ -311,7 +347,7 @@ fn add_task_to_db(task_name: &str) -> Result<Vec<Task>, Error> {
         created_at: Utc::now(),
         completed_at: None,
     });
-    fs::write(DB_PATH, &serde_json::to_vec(&parsed)?)?;
+    write_db(&parsed)?;
     Ok(parsed)
 }
 
@@ -319,8 +355,40 @@ fn remove_task_at_index(task_list_state: &mut ListState) -> Result<(), Error> {
     if let Some(selected) = task_list_state.selected() {
         let mut parsed = read_db()?;
         parsed.remove(selected);
-        fs::write(DB_PATH, &serde_json::to_vec(&parsed)?)?;
+        write_db(&parsed)?;
         task_list_state.select(Some(selected - 1));
     }
     Ok(())
+}
+
+fn render_popup<'a>(size: Rect) -> (Block<'a>, Rect) {
+    let block = Block::default().title("Add task").borders(Borders::ALL);
+    let area = centered_rect(60, 20, size);
+    (block, area)
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, rect: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(rect);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }

@@ -1,0 +1,14 @@
+[
+    {
+        "id": 1,
+        "name": "Mow lawn",
+        "created_at": "2020-09-01T12:00:00Z",
+        "completed_at": "2020-09-01T12:00:00Z"
+    },
+    {
+        "id": 2,
+        "name": "Pay rent",
+        "created_at": "2020-09-01T12:00:00Z",
+        "completed_at": "2020-09-01T12:00:00Z"
+    }
+]
